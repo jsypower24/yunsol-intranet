@@ -22,7 +22,12 @@ suite('API (PostgreSQL)', () => {
   beforeAll(async () => {
     process.env.DATABASE_URL = url;
     process.env.YUNSOL_PAYMENT_KEY = 'nJ2X7h8k0tJ6vYf3Zc9q1wRr5sT4uV7xY0aB2cD3eF4=';
-    execSync('npx prisma migrate reset --force --skip-generate --skip-seed', { env: { ...process.env, DATABASE_URL: url }, stdio: 'ignore' });
+    execSync('npx prisma migrate deploy', { env: { ...process.env, DATABASE_URL: url }, stdio: 'ignore' });
+    const { PrismaClient } = await import('@prisma/client');
+    const db = new PrismaClient({ datasourceUrl: url });
+    const tables = await db.$queryRawUnsafe<{ tablename: string }[]>("SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename <> '_prisma_migrations'");
+    await db.$executeRawUnsafe('TRUNCATE ' + tables.map(t => '"' + t.tablename + '"').join(',') + ' RESTART IDENTITY CASCADE');
+    await db.$disconnect();
     execSync('npx tsx scripts/init-admin.ts admin', { env: { ...process.env, DATABASE_URL: url, YUNSOL_ADMIN_PASSWORD: 'Admin1234!' }, stdio: 'ignore' });
     ({ handle } = await import('../src/server/api'));
   }, 120_000);
