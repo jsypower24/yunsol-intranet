@@ -6,7 +6,7 @@ import { prisma } from './db';
 import { decrypt, encrypt, paymentKey } from './fernet';
 import { passwordHash, verifyPassword } from './password';
 import { project } from './project';
-import { allowed, ApiError, MENUS, PAYMENT_FIELDS, require, Row, rowId, stamp, State, tracked, trackerTargets, validDetailImages } from './rules';
+import { allowed, ApiError, MENUS, PAYMENT_FIELDS, ensure, Row, rowId, stamp, State, tracked, trackerTargets, validDetailImages } from './rules';
 import { hashToken, newToken, readCookie, sessionCookie, sessionUserId } from './session';
 import { latestRevision, loadState, lockWrites, persistDiff } from './store';
 import { companyTemplate, parseCompanySheet } from './excel';
@@ -29,11 +29,11 @@ function json({ status = 200, body, cookie, headers }: Result) {
 
 async function readBody(request: Request): Promise<Row> {
   const type = request.headers.get('content-type') || '';
-  require(type.split(';')[0].trim() === 'application/json');
+  ensure(type.split(';')[0].trim() === 'application/json');
   const text = await request.text();
-  require(text.length > 0 && text.length < 20_000_000);
+  ensure(text.length > 0 && text.length < 20_000_000);
   const body = JSON.parse(text);
-  require(body && typeof body === 'object' && !Array.isArray(body));
+  ensure(body && typeof body === 'object' && !Array.isArray(body));
   return body;
 }
 
@@ -44,8 +44,9 @@ async function write<T>(fn: (tx: Prisma.TransactionClient, state: State, before:
     const before = await loadState(tx);
     const state = structuredClone(before);
     const value = await fn(tx, state, before);
-    await persistDiff(tx, before, state, actor);
-    return { value, state, revision: await latestRevision(tx) };
+    const changed = await persistDiff(tx, before, state, actor);
+    // 저장 후 DB 기준으로 다시 읽어 화면에 기본값까지 같은 모양으로 내려줍니다.
+    return { value, state: changed ? await loadState(tx) : state, revision: await latestRevision(tx) };
   }, { timeout: 30_000, maxWait: 15_000 });
 }
 
@@ -83,7 +84,7 @@ async function route(request: Request, path: string): Promise<Result> {
   if (method === 'POST') {
     const origin = request.headers.get('origin');
     const host = request.headers.get('x-forwarded-host') || request.headers.get('host');
-    require(!origin || new URL(origin).host === host, '허용되지 않은 요청입니다.', 403);
+    ensure(!origin || new URL(origin).host === host, '허용되지 않은 요청입니다.', 403);
   }
 
   if (method === 'POST' && path === 'login') {
@@ -97,7 +98,7 @@ async function route(request: Request, path: string): Promise<Result> {
       recordLoginFailure(key);
       throw new ApiError(401, '아이디 또는 비밀번호가 올바르지 않습니다.');
     }
-    require(user.approved && user.active !== false, '승인 대기 중이거나 사용이 정지된 계정입니다.', 403);
+    ensure(user.approved && user.active !== false, '승인 대기 중이거나 사용이 정지된 계정입니다.', 403);
     clearLoginFailures(key);
     const plain = newToken();
     const duration = body.remember ? 30 * 86400 : 12 * 3600;
@@ -113,13 +114,13 @@ async function route(request: Request, path: string): Promise<Result> {
   }
   if (method === 'POST' && path === 'signup') {
     const body = await readBody(request);
-    require(['name', 'username', 'password'].every(k => typeof body[k] === 'string' && body[k]));
-    require(body.username.length <= 60 && body.name.length <= 60, '이름과 아이디는 60자 이내로 입력해주세요.');
-    require(body.password.length >= 8, '비밀번호는 8자 이상으로 입력해주세요.');
+    ensure(['name', 'username', 'password'].every(k => typeof body[k] === 'string' && body[k]));
+    ensure(body.username.length <= 60 && body.name.length <= 60, '이름과 아이디는 60자 이내로 입력해주세요.');
+    ensure(body.password.length >= 8, '비밀번호는 8자 이상으로 입력해주세요.');
     checkLoginAllowed('signup|' + clientKey(request));
     recordLoginFailure('signup|' + clientKey(request));
     await write((_tx, state) => {
-      require(!state.users.some(u => u.username === body.username), '이미 사용 중인 아이디입니다.');
+      ensure(!state.users.some(u => u.username === body.username), '이미 사용 중인 아이디입니다.');
       state.users.push({
         id: crypto.randomUUID().replace(/-/g, ''), name: body.name, username: body.username, secret: passwordHash(body.password),
         admin: false, approved: false, active: true, permissions: [], color: '#3b82f6', edited: '',
@@ -130,14 +131,14 @@ async function route(request: Request, path: string): Promise<Result> {
 
   if (method === 'GET' && path === 'revision') {
     const token = readCookie(request.headers.get('cookie'));
-    require(await sessionUserId(prisma, token), '로그인이 필요합니다.', 401);
+    ensure(await sessionUserId(prisma, token), '로그인이 필요합니다.', 401);
     return { body: { revision: await latestRevision(prisma) } };
   }
 
   // 이하 로그인 필요
   const { state: snapshot, revision: snapshotRevision } = await readSnapshot();
   const { user } = await currentUser(request, snapshot);
-  require(user, '로그인이 필요합니다.', 401);
+  ensure(user, '로그인이 필요합니다.', 401);
   const actor = { id: user.id as string, name: user.name as string };
 
   if (method === 'GET' && path === 'state') {
@@ -146,7 +147,7 @@ async function route(request: Request, path: string): Promise<Result> {
 
   if (method === 'POST' && path === 'state') {
     const body = (await readBody(request)) as ChangeBody;
-    require(Number.isInteger(body.revision), '입력값을 확인해주세요.');
+    ensure(Number.isInteger(body.revision), '입력값을 확인해주세요.');
     const { state, revision } = await write(async (tx, state) => {
       const me = state.users.find(u => u.id === user.id)!;
       await assertNoConflicts(tx, state, body, body.revision!, me.id);
@@ -159,31 +160,31 @@ async function route(request: Request, path: string): Promise<Result> {
   if (method === 'POST' && path === 'tracker-workplace') {
     const body = await readBody(request);
     const company = snapshot.companies.find(c => c.id === body.id);
-    require(tracked(company, trackerTargets(snapshot, user)), '담당 업무에 연결된 사업장 정보만 볼 수 있습니다.', 403);
+    ensure(tracked(company, trackerTargets(snapshot, user)), '담당 업무에 연결된 사업장 정보만 볼 수 있습니다.', 403);
     return { body: { company, fields: snapshot.companyFields } };
   }
 
   if (method === 'POST' && path === 'company-payment') {
-    require(allowed(user, 'company'), '사업장 정보 접근 권한이 없습니다.', 403);
+    ensure(allowed(user, 'company'), '사업장 정보 접근 권한이 없습니다.', 403);
     const body = await readBody(request);
     const company = snapshot.companies.find(c => c.id === body.id);
-    require(company, '사업장을 찾을 수 없습니다.', 404);
+    ensure(company, '사업장을 찾을 수 없습니다.', 404);
     if (body.action === 'read') {
       const record = await prisma.companyPayment.findUnique({ where: { companyId: company.id } });
       const fields = record ? JSON.parse(decrypt(paymentKey(), Buffer.from(record.encrypted)).toString('utf8')) : {};
       await prisma.changeLog.create({ data: { userId: user.id, userName: user.name, collection: 'companyPayment', rowId: company.id, action: 'read' } });
       return { body: { method: company.transferMethod || '', fields, version: record?.version ?? 0 } };
     }
-    require(body.action === 'write');
+    ensure(body.action === 'write');
     const methodName = body.method;
     const fields = body.fields;
-    require(typeof methodName === 'string' && methodName in PAYMENT_FIELDS && fields && typeof fields === 'object' && !Array.isArray(fields)
+    ensure(typeof methodName === 'string' && methodName in PAYMENT_FIELDS && fields && typeof fields === 'object' && !Array.isArray(fields)
       && Object.keys(fields).every(k => PAYMENT_FIELDS[methodName].has(k))
       && Object.values(fields).every(v => typeof v === 'string' && v.length <= 160));
     const { state, revision } = await write(async (tx, state) => {
       const record = await tx.companyPayment.findUnique({ where: { companyId: company.id } });
       const version = record?.version ?? 0;
-      require(body.version === version, '이체 수단이 변경되었습니다. 다시 열어 확인해주세요.', 409);
+      ensure(body.version === version, '이체 수단이 변경되었습니다. 다시 열어 확인해주세요.', 409);
       const encrypted = encrypt(paymentKey(), Buffer.from(JSON.stringify(fields), 'utf8'));
       await tx.companyPayment.upsert({
         where: { companyId: company.id },
@@ -198,16 +199,16 @@ async function route(request: Request, path: string): Promise<Result> {
   }
 
   if (method === 'POST' && path === 'tracker-profile') {
-    require(allowed(user, 'work'), '업무 트래커 접근 권한이 없습니다.', 403);
+    ensure(allowed(user, 'work'), '업무 트래커 접근 권한이 없습니다.', 403);
     const body = await readBody(request);
-    require(Object.keys(body).sort().join() === 'icon,revision,title');
+    ensure(Object.keys(body).sort().join() === 'icon,revision,title');
     const { title, icon } = body;
-    require(typeof title === 'string' && title.length <= 60 && !/[\r\n]/.test(title));
-    require(icon && typeof icon === 'object' && Object.keys(icon).sort().join() === 'kind,value' && typeof icon.value === 'string');
-    if (icon.kind === 'emoji') require(icon.value.length <= 24 && [...icon.value].every((c: string) => c.codePointAt(0)! >= 32));
+    ensure(typeof title === 'string' && title.length <= 60 && !/[\r\n]/.test(title));
+    ensure(icon && typeof icon === 'object' && Object.keys(icon).sort().join() === 'kind,value' && typeof icon.value === 'string');
+    if (icon.kind === 'emoji') ensure(icon.value.length <= 24 && [...icon.value].every((c: string) => c.codePointAt(0)! >= 32));
     else if (icon.kind === 'image') {
-      require(icon.value.length <= 341_380 && validDetailImages([{ name: 'icon', data: icon.value }]), '아이콘 이미지 형식 또는 크기를 확인해주세요.');
-    } else require(false);
+      ensure(icon.value.length <= 341_380 && validDetailImages([{ name: 'icon', data: icon.value }]), '아이콘 이미지 형식 또는 크기를 확인해주세요.');
+    } else ensure(false);
     const { state, revision } = await write((_tx, state) => {
       const me = state.users.find(u => u.id === user.id)!;
       me.trackerTitle = title;
@@ -224,9 +225,9 @@ async function route(request: Request, path: string): Promise<Result> {
         labor: 'work', other: 'work', 'company-hidden': 'company', 'labor-hidden': 'work', 'other-hidden': 'work',
         overtimeRows: 'overtime', subsidyDiscovery: 'overtime', ...Object.fromEntries(MENUS.map(p => [p, p])),
       };
-      require(typeof name === 'string' && name in permissions && (['fee', 'teamFees'].includes(name) || allowed(user, permissions[name])),
+      ensure(typeof name === 'string' && name in permissions && (['fee', 'teamFees'].includes(name) || allowed(user, permissions[name])),
         '이 표에 접근할 권한이 없습니다.', 403);
-      require(Array.isArray(order) && (name.endsWith('-hidden') ? 0 : 1) <= order.length && order.length <= 128
+      ensure(Array.isArray(order) && (name.endsWith('-hidden') ? 0 : 1) <= order.length && order.length <= 128
         && order.every(rowId) && new Set(order).size === order.length);
       await prisma.columnOrder.upsert({
         where: { userId_name: { userId: user.id, name } },
@@ -239,7 +240,7 @@ async function route(request: Request, path: string): Promise<Result> {
   }
 
   if (method === 'GET' && path === 'company-template') {
-    require(allowed(user, 'company'), '사업장 정보 접근 권한이 없습니다.', 403);
+    ensure(allowed(user, 'company'), '사업장 정보 접근 권한이 없습니다.', 403);
     const file = await companyTemplate(snapshot.companyFields);
     return {
       body: file,
@@ -251,19 +252,19 @@ async function route(request: Request, path: string): Promise<Result> {
   }
 
   if (method === 'POST' && path === 'company-import') {
-    require(allowed(user, 'company'), '사업장 정보 접근 권한이 없습니다.', 403);
+    ensure(allowed(user, 'company'), '사업장 정보 접근 권한이 없습니다.', 403);
     const type = request.headers.get('content-type') || '';
-    require(type.startsWith('application/octet-stream') || type.startsWith('application/vnd.openxmlformats'));
+    ensure(type.startsWith('application/octet-stream') || type.startsWith('application/vnd.openxmlformats'));
     const buffer = Buffer.from(await request.arrayBuffer());
-    require(buffer.length > 0 && buffer.length <= 10_000_000, '엑셀 파일은 10MB까지 올릴 수 있습니다.');
+    ensure(buffer.length > 0 && buffer.length <= 10_000_000, '엑셀 파일은 10MB까지 올릴 수 있습니다.');
     return { body: await parseCompanySheet(buffer, snapshot.companyFields) };
   }
 
   if (method === 'GET' && path.startsWith('history/')) {
     const [, collection, id] = path.split('/');
-    require(typeof collection === 'string' && rowId(id));
+    ensure(typeof collection === 'string' && rowId(id));
     const page = { companies: 'company', works: 'work', users: 'admin', fees: 'fee', sales: 'sales', setupRows: 'new', overtimeRows: 'overtime', subsidyDiscovery: 'overtime' }[collection];
-    require(page && allowed(user, page), '변경 이력을 볼 권한이 없습니다.', 403);
+    ensure(page && allowed(user, page), '변경 이력을 볼 권한이 없습니다.', 403);
     const logs = await prisma.changeLog.findMany({ where: { collection, rowId: id, action: { not: 'read' } }, orderBy: { id: 'desc' }, take: 100 });
     return { body: logs.map(l => ({ at: l.at.toISOString(), user: l.userName, action: l.action, fields: l.fields, before: l.before, after: l.after })) };
   }

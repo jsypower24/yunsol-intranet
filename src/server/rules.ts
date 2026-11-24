@@ -47,7 +47,7 @@ export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
 
-export function require(condition: unknown, message = '입력값을 확인해주세요.', status = 400): asserts condition {
+export function ensure(condition: unknown, message = '입력값을 확인해주세요.', status = 400): asserts condition {
   if (!condition) throw new ApiError(status, message);
 }
 
@@ -103,7 +103,7 @@ export function formattedBizno(value: string) {
 }
 
 export function validateChoices(values: unknown, options?: Set<string>) {
-  require(Array.isArray(values) && values.length <= 3 && values.every(x => typeof x === 'string')
+  ensure(Array.isArray(values) && values.length <= 3 && values.every(x => typeof x === 'string')
     && new Set(values).size === values.length && (!options || values.every(v => options.has(v))));
 }
 
