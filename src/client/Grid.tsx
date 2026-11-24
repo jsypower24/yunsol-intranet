@@ -159,7 +159,7 @@ export function Grid<T>(props: GridProps<T>) {
             {orderedColumns.map((c, i) => {
               const active = sort?.key === c.key || filters.some(([k]) => k === c.key);
               return (
-                <th key={c.key} data-column={c.key} data-order-key={reorder ? c.key : undefined} className={[pinClass(c.key), dropTarget === c.key ? 'drop-target' : ''].filter(Boolean).join(' ') || undefined}
+                <th key={c.key} data-column={c.key} data-colkey={c.key} data-order-key={reorder ? c.key : undefined} className={[pinClass(c.key), dropTarget === c.key ? 'drop-target' : ''].filter(Boolean).join(' ') || undefined}
                   scope="col" aria-sort={sort?.key === c.key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
                   draggable={reorder}
                   onDragStart={e => { dragSource.current = c.key; e.dataTransfer.setData('text/plain', c.key); e.dataTransfer.effectAllowed = 'move'; }}
@@ -187,7 +187,7 @@ export function Grid<T>(props: GridProps<T>) {
             {shownRows.map(row => (
               <tr key={rowKey(row)}>
                 {orderedColumns.map(c => (
-                  <td key={c.key} data-column={c.key} className={[pinClass(c.key), c.tdClass].filter(Boolean).join(' ') || undefined}>
+                  <td key={c.key} data-column={c.key} data-colkey={c.key} className={[pinClass(c.key), c.tdClass].filter(Boolean).join(' ') || undefined}>
                     {renderCell(row, c)}
                   </td>
                 ))}

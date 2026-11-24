@@ -106,6 +106,7 @@ export function save(): Promise<boolean> {
       return true;
     } catch (error: any) {
       store.generation++;
+      history.undo = []; history.redo = [];
       if (error.status === 401) authHandler();
       else {
         try { adopt(await api('state')); }
@@ -137,6 +138,7 @@ export async function poll() {
     const result = await api('state');
     if (!store.current || busy() || initial !== store.revision || result.revision === store.revision) return;
     adopt(result);
+    history.undo = []; history.redo = [];
     notify();
   } catch (error: any) {
     if (error.status === 401 && !store.pending) authHandler();
@@ -171,4 +173,38 @@ export function orderedKeys(group: string, defaults: string[]) {
     }
   }
   return [...new Set([...stored, ...defaults])];
+}
+
+// 실행 취소·다시 실행 (영업자, 팀원 관리, 정리메모, 설정 화면)
+const HISTORY_LIMIT = 80;
+export const history = { undo: [] as string[], redo: [] as string[] };
+function snapshot() { return JSON.stringify(store.state); }
+export function historyCheckpoint() {
+  const snap = snapshot();
+  if (history.undo[history.undo.length - 1] !== snap) {
+    history.undo.push(snap);
+    if (history.undo.length > HISTORY_LIMIT) history.undo.shift();
+  }
+  history.redo = [];
+}
+export function clearHistory() { history.undo = []; history.redo = []; notify(); }
+function restore(snap: string, message: string, page: string) {
+  const restored = JSON.parse(snap);
+  const current = store.current!;
+  for (const [key, permission] of Object.entries({ newLeads: 'new', sales: 'sales', users: 'admin' })) {
+    if (current.admin || (current.permissions || []).includes(permission)) store.state![key] = restored[key];
+  }
+  if (page === 'memo') store.state!.memo = restored.memo;
+  if (page === 'settings') store.state!.settings = restored.settings;
+  save().then(ok => { if (ok !== false) toast(message); });
+}
+export function undoApp(page: string) {
+  if (!history.undo.length) return;
+  history.redo.push(snapshot());
+  restore(history.undo.pop()!, '방금 작업을 되돌렸습니다.', page);
+}
+export function redoApp(page: string) {
+  if (!history.redo.length) return;
+  history.undo.push(snapshot());
+  restore(history.redo.pop()!, '되돌린 작업을 다시 실행했습니다.', page);
 }
