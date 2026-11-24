@@ -1,0 +1,351 @@
+// 윤솔 인트라넷 데이터베이스 설계
+// - 모든 업무 데이터는 행 단위로 저장하고, 각 행에 수정자·수정일·버전을 남깁니다.
+// - change_log 테이블이 변경 이력(감사 기록)과 동시 수정 충돌 판단, 화면 동기화 기준을 함께 담당합니다.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id              String   @id
+  username        String?  @unique
+  name            String   @default("")
+  givenName       String   @default("") @map("given_name")
+  secret          String?
+  admin           Boolean  @default(false)
+  approved        Boolean  @default(false)
+  active          Boolean  @default(true)
+  teamAdded       Boolean  @default(false) @map("team_added")
+  permissions     String[] @default([])
+  trackerAccess   String[] @default([]) @map("tracker_access")
+  color           String   @default("#3b82f6")
+  birthDate       String   @default("") @map("birth_date")
+  workPhone       String   @default("") @map("work_phone")
+  extension       String   @default("")
+  phone           String   @default("")
+  dept            String   @default("")
+  position        String   @default("")
+  performanceBase BigInt   @default(0) @map("performance_base")
+  trackerTitle    String   @default("") @map("tracker_title")
+  trackerIcon     Json?    @map("tracker_icon")
+  edited          String   @default("")
+  version         Int      @default(1)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at")
+  updatedById     String?  @map("updated_by_id")
+
+  sessions     Session[]
+  columnOrders ColumnOrder[]
+  tracker      PrivateTracker?
+
+  @@map("users")
+}
+
+model Session {
+  tokenHash String   @id @map("token_hash")
+  userId    String   @map("user_id")
+  expires   DateTime
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model Company {
+  id                 String   @id
+  category           String   @default("진행(자문)")
+  setup              Boolean  @default(false)
+  name               String   @default("")
+  cms                String   @default("")
+  bizno              String   @default("")
+  biznoDigits        String   @default("") @map("bizno_digits")
+  ceo                String   @default("")
+  related            String   @default("")
+  sales              String   @default("")
+  comm               String   @default("")
+  phone              String   @default("")
+  address            String   @default("")
+  bookFee            String   @default("") @map("book_fee")
+  supportFee         String   @default("") @map("support_fee")
+  payday             String   @default("")
+  status             String   @default("")
+  paymentMethod      String   @default("") @map("payment_method")
+  transferMethod     String   @default("") @map("transfer_method")
+  closedOn           String   @default("") @map("closed_on")
+  closureReason      String   @default("") @map("closure_reason")
+  detailNotes        String   @default("") @map("detail_notes")
+  detailImages       Json?    @map("detail_images")
+  detailBlocks       Json?    @map("detail_blocks")
+  lastActiveCategory String   @default("") @map("last_active_category")
+  mainManagers       String[] @default([]) @map("main_managers")
+  feeOwners          String[] @default([]) @map("fee_owners")
+  custom             Json     @default("{}")
+  edited             String   @default("")
+  version            Int      @default(1)
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @default(now()) @updatedAt @map("updated_at")
+  updatedById        String?  @map("updated_by_id")
+
+  works    Work[]
+  setupRow SetupRow?
+  payment  CompanyPayment?
+
+  @@index([biznoDigits])
+  @@index([cms])
+  @@map("companies")
+}
+
+model CompanyPayment {
+  companyId String   @id @map("company_id")
+  version   Int      @default(0)
+  encrypted Bytes
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("company_payments")
+}
+
+model Work {
+  id             String   @id
+  companyId      String   @map("company_id")
+  month          String   @default("")
+  payday         String   @default("")
+  roster         String   @default("")
+  note           String   @default("")
+  accountingInfo String   @default("") @map("accounting_info")
+  deadline       String   @default("")
+  hire           String   @default("")
+  worker         String   @default("")
+  round          String   @default("")
+  when           String   @default("")
+  selection      String   @default("")
+  agency         String   @default("")
+  fee            String   @default("")
+  requested      Boolean  @default(false)
+  started        Boolean  @default(false)
+  received       Boolean  @default(false)
+  sent           Boolean  @default(false)
+  payslip        Boolean  @default(false)
+  accounting     Boolean  @default(false)
+  feeChecked     Boolean  @default(false) @map("fee_checked")
+  employment     Boolean  @default(false)
+  daily          Boolean  @default(false)
+  insurance      Boolean  @default(false)
+  classTags      String[] @default([]) @map("class_tags")
+  closed         String   @default("진행")
+  edited         String   @default("")
+  version        Int      @default(1)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at")
+  updatedById    String?  @map("updated_by_id")
+  company        Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@map("works")
+}
+
+model SetupRow {
+  id                      String   @id
+  contractSetup           Boolean  @default(false) @map("contract_setup")
+  previousAgencyDismissed Boolean  @default(false) @map("previous_agency_dismissed")
+  taxRequest              Boolean  @default(false) @map("tax_request")
+  reportNeeded            Boolean  @default(false) @map("report_needed")
+  reportCompleted         Boolean  @default(false) @map("report_completed")
+  adviceContract          Boolean  @default(false) @map("advice_contract")
+  folderCreated           Boolean  @default(false) @map("folder_created")
+  cmsMember               Boolean  @default(false) @map("cms_member")
+  setupDebit              Boolean  @default(false) @map("setup_debit")
+  cmsBill                 Boolean  @default(false) @map("cms_bill")
+  edi                     Boolean  @default(false)
+  employeeRoster          Boolean  @default(false) @map("employee_roster")
+  notion                  Boolean  @default(false)
+  googleSheet             Boolean  @default(false) @map("google_sheet")
+  hrHelper                Boolean  @default(false) @map("hr_helper")
+  certificateReceived     Boolean  @default(false) @map("certificate_received")
+  setupFee                String   @default("") @map("setup_fee")
+  firstDebit              String   @default("") @map("first_debit")
+  workStart               String   @default("") @map("work_start")
+  payrollStart            String   @default("") @map("payroll_start")
+  subsidy                 String   @default("")
+  specialNotes            String   @default("") @map("special_notes")
+  baseManagers            String[] @default([]) @map("base_managers")
+  temporaryManagers       String[] @default([]) @map("temporary_managers")
+  edited                  String   @default("")
+  version                 Int      @default(1)
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @default(now()) @updatedAt @map("updated_at")
+  updatedById             String?  @map("updated_by_id")
+  company                 Company  @relation(fields: [id], references: [id], onDelete: Cascade)
+
+  @@map("setup_rows")
+}
+
+model SalesPerson {
+  id          String   @id
+  name        String   @default("")
+  phone       String   @default("")
+  org         String   @default("")
+  rate        String   @default("")
+  note        String   @default("")
+  edited      String   @default("")
+  version     Int      @default(1)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+  updatedById String?  @map("updated_by_id")
+
+  @@map("sales_people")
+}
+
+// 이전 버전에서 넘어온 신규 문의 기록. 화면에는 노출하지 않지만 보존합니다.
+model NewLead {
+  id          String   @id
+  data        Json     @default("{}")
+  edited      String   @default("")
+  version     Int      @default(1)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+  updatedById String?  @map("updated_by_id")
+
+  @@map("new_leads")
+}
+
+model Fee {
+  id           String   @id
+  source       String // hyosung | transfer
+  cms          String   @default("")
+  memberName   String   @default("") @map("member_name")
+  billingMonth String   @map("billing_month")
+  product      String   @default("")
+  amount       BigInt   @default(0)
+  status       String   @default("")
+  method       String   @default("")
+  contractDay  String   @default("") @map("contract_day")
+  date         String   @default("")
+  companyRef   String   @default("") @map("company_ref")
+  edited       String   @default("")
+  version      Int      @default(1)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+  updatedById  String?  @map("updated_by_id")
+
+  @@index([billingMonth])
+  @@index([cms])
+  @@map("fees")
+}
+
+model Invoice {
+  id           String @id
+  cms          String @default("")
+  billingMonth String @default("") @map("billing_month")
+  transmission String @default("")
+  amount       BigInt @default(0)
+  written      String @default("")
+  issued       String @default("")
+  approval     String @default("")
+  source       String @default("hyosung")
+
+  @@index([written])
+  @@map("invoices")
+}
+
+model FeeImport {
+  month      String   @id
+  importedAt DateTime @map("imported_at")
+
+  @@map("fee_imports")
+}
+
+model OvertimeRow {
+  id          String   @id
+  date        String
+  memberId    String   @map("member_id")
+  start       String   @default("")
+  end         String   @default("")
+  breakHours  Float?   @map("break_hours")
+  usedHours   Float?   @map("used_hours")
+  reason      String   @default("")
+  note        String   @default("")
+  edited      String   @default("")
+  version     Int      @default(1)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+  updatedById String?  @map("updated_by_id")
+
+  @@index([date])
+  @@map("overtime_rows")
+}
+
+model SubsidyDiscovery {
+  id          String   @id
+  date        String
+  memberIds   String[] @default([]) @map("member_ids")
+  companyIds  String[] @default([]) @map("company_ids")
+  type        String   @default("")
+  headcount   Int?
+  status      String   @default("")
+  note        String   @default("")
+  edited      String   @default("")
+  version     Int      @default(1)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+  updatedById String?  @map("updated_by_id")
+
+  @@index([date])
+  @@map("subsidy_discovery")
+}
+
+// 팀원별 표 열 순서·숨김 설정
+model ColumnOrder {
+  userId String @map("user_id")
+  name   String
+  order  Json
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, name])
+  @@map("column_orders")
+}
+
+// 개인 업무 트래커에 팀원이 직접 추가한 열과 값
+model PrivateTracker {
+  userId String @id @map("user_id")
+  fields Json   @default("[]")
+  values Json   @default("{}")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("private_trackers")
+}
+
+// memo, settings(officeName), companyFields(공용 열 정의)
+model AppSetting {
+  key         String   @id
+  value       Json
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+  updatedById String?  @map("updated_by_id")
+
+  @@map("app_settings")
+}
+
+// 변경 이력: 누가, 언제, 어떤 행의 어떤 항목을 바꿨는지 기록합니다.
+// id는 전체 변경 순번(revision)으로 화면 동기화와 동시 수정 충돌 판단에 사용합니다.
+model ChangeLog {
+  id         BigInt   @id @default(autoincrement())
+  at         DateTime @default(now())
+  userId     String?  @map("user_id")
+  userName   String   @default("") @map("user_name")
+  collection String
+  rowId      String   @map("row_id")
+  action     String // create | update | delete
+  fields     String[] @default([])
+  before     Json?
+  after      Json?
+
+  @@index([collection, rowId, id])
+  @@index([at])
+  @@map("change_log")
+}

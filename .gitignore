@@ -5,3 +5,5 @@ node_modules/
 *.tsbuildinfo
 next-env.d.ts
 coverage/
+demo/.out/
+demo/yunsol-demo.html
